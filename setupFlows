@@ -1,0 +1,66 @@
+curl -X POST -d '{"switch": "00:00:00:00:00:00:00:01", "name":"flow-mod-2", "cookie":"0", "priority":"32769", "in_port":"2","active":"true", "actions":"output=1,output=controller"}' http://localhost:8080/wm/staticflowpusher/json
+
+curl -X POST -d '{"switch": "00:00:00:00:00:00:00:01", "name":"flow-mod-1", "cookie":"0", "priority":"32768", "in_port":"1","active":"true", "actions":"output=2,output=controller"}' http://localhost:8080/wm/staticflowpusher/json
+
+curl -X POST -d '{"switch": "00:00:00:00:00:00:00:01", "name":"flow-mod-1", "cookie":"0", "priority":"32768", "in_port":"1","active":"true", "actions":"output=2"}' http://localhost:8080/wm/staticflowpusher/json
+
+curl -X POST -d '{"switch": "00:00:00:00:00:00:00:01", "name":"flow-mod-22", "cookie":"1", "priority":"32770","in_port":"2","active":"true","eth_type":"0x0800","ip_proto":"0x06","tcp_src":"80", "actions":"output=controller"}' http://localhost:8080/wm/staticflowpusher/json
+
+curl -X POST -d '{"switch": "00:00:00:00:00:00:00:01", "name":"flow-mod-23", "cookie":"1", "priority":"16000","in_port":"2","active":"true","eth_type":"0x0806", "actions":"output=1"}' http://localhost:8080/wm/staticflowpusher/json
+
+
+sudo mn --controller=remote,ip=0.0.0.0,port=6653 --switch=ovsk
+
+sudo ovs-vsctl -- --id=@netflow create sflow agent=s1  target=\"127.0.0.1:6343\" sampling=1 polling=1 -- -- set bridge s1 sflow=@netflow
+sudo ovs-vsctl -- --id=@netflow create sflow agent=s2  target=\"127.0.0.1:6343\" sampling=1 polling=1 -- -- set bridge s2 sflow=@netflow
+
+sflowtool | egrep 'ifName|ifInUcastPkts|ifInMulticastPkts|ifInBroadcastPkts|ifOutUcastPkts|ifOutMulticastPkts|ifOutBroadcastPkts'
+
+sudo ovs-ofctl add-flow s1 "dl_dst=00:00:00:00:00:01,dl_type='*',actions=1"
+sudo ovs-ofctl add-flow s1 "dl_dst=00:00:00:00:00:02,dl_type='*',actions=2"
+sudo ovs-ofctl add-flow s1 "ip,ip_dst=10.0.0.1,actions=1"
+sudo ovs-ofctl add-flow s1 "ip,ip_dst=10.0.0.2,actions=2"
+
+sudo ovs-ofctl add-flow s1 "priority=5,in_port=1,dl_dst=01:00:00:00:00:00/01:00:00:00:00:00,actions=2"
+sudo ovs-ofctl add-flow s1 "priority=5,in_port=2,dl_dst=01:00:00:00:00:00/01:00:00:00:00:00,actions=1"
+
+
+Forward TCP SYN and TCP Packets with FIN and RST flags to the controller
+sudo ovs-ofctl del-flows s1
+sudo ovs-ofctl add-flow s1 "priority=1000,in_port=1,actions=2"
+sudo ovs-ofctl add-flow s1 "priority=1000,in_port=2,actions=1"
+sudo ovs-ofctl add-flow s1 "priority=4000,tcp,tcp_flags=0x2 actions=output:controller"
+sudo ovs-ofctl add-flow s1 "priority=4000,tcp,tcp_flags=+fin actions=output:controller"
+sudo ovs-ofctl add-flow s1 "priority=4000,tcp,tcp_flags=+rst actions=output:controller"
+sudo ovs-ofctl add-flow s1 "priority=2000,ip,nw_dst=10.0.0.1,actions=1"
+sudo ovs-ofctl add-flow s1 "priority=2000,ip,nw_dst=10.0.0.2,actions=2"
+
+
+Route Traffic Through Controller to the destination to modify the ack window
+sudo ovs-ofctl add-flow s1 "priority=10000,tcp,tcp_src=80,actions=controller"
+sudo ovs-ofctl add-flow s1 "priority=10000,tcp,tcp_dst=80,actions=controller"
+
+sudo ovs-ofctl add-flow s1 "priority=60000,tcp,ip,ip_src=10.0.0.5,actions=controller"
+
+Route traffic normally between devices according to MAC Address
+sudo ovs-ofctl add-flow s1 "dl_dst=00:00:00:00:00:02 actions=2"
+sudo ovs-ofctl add-flow s1 "dl_dst=00:00:00:00:00:01 actions=1"
+
+Upgrade OpenvSwitch
+Remove Old Version
+apt-get remove openvswitch-common openvswitch-datapath-dkms openvswitch-controller openvswitch-pki openvswitch-switch
+Download the latest Build
+./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --with-linux=/lib/modules/`uname -r`/build --enable-shared
+make
+sudo make install
+sudo make modules_install
+rmmod openvswitch
+depmod -a
+
+6. Disable to default controller
+echo “manual” >> /etc/init/openvswitch-controller.override
+/etc/init.d/openvswitch-controller stop
+7. Start OVS server process
+/etc/init.d/openvswitch-switch start
+
+echo “manual” >> /etc/init/openvswitch-controller.override
