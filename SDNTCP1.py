@@ -20,6 +20,8 @@ prevValue = [0]*15
 curPort = 0
 firstRun = True
 counter = 0
+modFlows = []
+maxBuffer = 5000
 
 print "Running"
 for line in iter(sys.stdin.readline, ""):
@@ -48,17 +50,18 @@ for line in iter(sys.stdin.readline, ""):
     elif (ifValue != 's1-eth13' and ifValue[:6] == 's1-eth'):
         curPort = int(ifValue[6:])
         writeIn = True
-    print str(datetime.datetime.now().time()) + " InputBuffer =  " + str(InputBuffer)
-    print "OutputBuffer = " + str(OutputBuffer)
+
     if (firstRun and counter == 100):
         InputBuffer = 0
         OutputBuffer = 0
         firstRun = False
     elif (firstRun):
         counter = counter + 1
+    print str(datetime.datetime.now().time()) + " InputBuffer =  " + str(InputBuffer) + " || OutputBuffer = " + str(OutputBuffer)
+    print "Percent Buffer: " + str(((InputBuffer-OutputBuffer)/maxBuffer) * 100)
 
     #Reach Critical Threshold and Change the Flow
-    if (InputBuffer > 2000):
+    if (InputBuffer-OutputBuffer > maxBuffer):
         file = open('/TCPFlows.txt', 'r')
         for lines in file.readlines():
             if lines not in windowAdj:
@@ -68,8 +71,10 @@ for line in iter(sys.stdin.readline, ""):
                 ipdst = lines.split('-')[1].split(':')[0]
                 portdst = lines.split('-')[1].split(':')[1]
                 cmd = 'sudo ovs-ofctl add-flow s1 \"priority=62000,tcp,tcp_src='+portsrc+',tcp_dst='+portdst+',ip,ip_src='+ipsrc+',ip_dst='+ipdst+',actions=controller\"'
+                modFlows.append('sudo ovs-ofctl del-flow s1 \"tcp,tcp_src='+portsrc+',tcp_dst='+portdst+',ip,ip_src='+ipsrc+',ip_dst='+ipdst+'\"')
                 system(cmd)
-                InputBuffer = 0
                 break
-
-#'sudo ovs-ofctl del-flow s1 \"tcp,tcp_src='+portsrc+',tcp_dst='+portdst+',ip,ip_src='+ipsrc+',ip_dst='+ipdst+'"'
+    elif (InputBuffer-OutputBuffer < maxBuffer):
+        for i in modFlows:
+            system(i)
+            modFlows.remove(i)
